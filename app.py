@@ -9,10 +9,11 @@ from core.database import init_db, get_db_connection, get_course_pars_and_si
 st.set_page_config(page_title="FairwayIQ Master Hub", page_icon="⛳", layout="wide")
 
 # --- 📱 PWA ENGINE & OFFLINE STORAGE INJECTION ---
+# --- 📱 PWA ENGINE & OFFLINE STORAGE INJECTION ---
 def enable_pwa_with_offline_cache(player_id="1", current_hole=1, current_scores=None):
     """
-    Injects PWA web app manifest metadata and a JavaScript localStorage engine
-    to support full-screen app installation and offline golf score caching.
+    Injects PWA web app manifest metadata, a Service Worker for static caching,
+    and a JavaScript localStorage engine for offline score persistence.
     """
     if current_scores is None:
         current_scores = {}
@@ -40,7 +41,39 @@ def enable_pwa_with_offline_cache(player_id="1", current_hole=1, current_scores=
     metaStatus.content = 'black-translucent';
     document.head.appendChild(metaStatus);
 
-    // 2. LocalStorage Scoring Engine
+    // 2. Service Worker Registration for Static Caching (Targeting window.parent for Streamlit)
+    const targetNav = window.parent.navigator || navigator;
+    if ('serviceWorker' in targetNav) {{
+        const swCode = `
+            const CACHE_NAME = 'fairwayiq-v1';
+            const ASSETS_TO_CACHE = ['/'];
+            
+            self.addEventListener('install', (e) => {{
+                e.waitUntil(
+                    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS_TO_CACHE))
+                );
+                self.skipWaiting();
+            }});
+
+            self.addEventListener('activate', (e) => {{
+                e.waitUntil(self.clients.claim());
+            }});
+
+            self.addEventListener('fetch', (e) => {{
+                e.respondWith(
+                    fetch(e.request).catch(() => caches.match(e.request))
+                );
+            }});
+        `;
+        const blob = new Blob([swCode], {{ type: 'application/javascript' }});
+        const swUrl = URL.createObjectURL(blob);
+        
+        targetNav.serviceWorker.register(swUrl)
+            .then(reg => console.log('⛳ ServiceWorker Active:', reg.scope))
+            .catch(err => console.log('ServiceWorker Reg Failed:', err));
+    }}
+
+    // 3. LocalStorage Scoring Engine
     const PLAYER_KEY = 'fairwayiq_player_{player_id}_scores';
     const HOLE_KEY = 'fairwayiq_player_{player_id}_current_hole';
 
@@ -62,7 +95,7 @@ def enable_pwa_with_offline_cache(player_id="1", current_hole=1, current_scores=
         saveScoresLocally(serverScores, activeHole);
     }}
 
-    // 3. Network Connection Status Listener
+    // 4. Network Connection Status Listener
     function updateOnlineStatus() {{
         const isOnline = navigator.onLine;
         let badge = document.getElementById('fairwayiq-net-status');
