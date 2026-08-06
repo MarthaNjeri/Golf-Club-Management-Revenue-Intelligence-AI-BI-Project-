@@ -1,10 +1,44 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import os
 from core.database import init_db, get_db_connection, get_course_pars_and_si
 
 # 1. CONFIGURE GLOBAL WORKSPACE
 st.set_page_config(page_title="FairwayIQ Master Hub", page_icon="⛳", layout="wide")
+
+# --- 📱 PWA ENGINE INJECTION ---
+def enable_pwa():
+    """
+    Injects PWA web app manifest metadata into the browser head
+    to enable "Add to Home Screen" full-screen capabilities on mobile devices.
+    """
+    pwa_html = """
+    <script>
+    // 1. Inject Manifest dynamically into document head
+    if (!document.querySelector('link[rel="manifest"]')) {
+        const manifestLink = document.createElement('link');
+        manifestLink.rel = 'manifest';
+        manifestLink.href = 'data:application/json;base64,eyJzaG9ydF9uYW1lIjoiRmFpcndheUlRIiwibmFtZSI6IkZhaXJ3YXlJUSBHb2xmIFJldmVudWUgJiBPcGVyYXRpb25zIiwiaWNvbnMiOlt7InNyYyI6Imh0dHBzOi8vY2RuLWljb25zLXBuZy5mbGF0aWNvbi5jb20vNTEyLzMwNzYvMzA3NjQxMy5wbmciLCJ0eXBlIjoiaW1hZ2UvcG5nIiwic2l6ZXMiOiIxOTJ4MTkyIn0seyJzcmMiOiJodHRwczovL2Nkbi1pY29ucy1wbmcuZmxhdGljb24uY29tLzUxMi8zMDc2LzMwNzY0MTMucG5nIiwidHlwZSI6ImltYWdlL3BuZyIsInNpemVzIjointeDUxMiJ9XSwic3RhcnRfdXJsIjoiLyIsImJhY2tncm91bmRfY29sb3IiOiIjZmZmZmZmIiwidGhlbWVfY29sb3IiOiIjMWI4ZDNlIiwiZGlzcGxheSI6InN0YW5kYWxvbmUiLCJvcmllbnRhdGlvbiI6InBvcnRyYWl0In0=';
+        document.head.appendChild(manifestLink);
+    }
+
+    // 2. Mobile Safari & Chrome App Mode Tags
+    const metaApp = document.createElement('meta');
+    metaApp.name = 'apple-mobile-web-app-capable';
+    metaApp.content = 'yes';
+    document.head.appendChild(metaApp);
+
+    const metaStatus = document.createElement('meta');
+    metaStatus.name = 'apple-mobile-web-app-status-bar-style';
+    metaStatus.content = 'black-translucent';
+    document.head.appendChild(metaStatus);
+    </script>
+    """
+    components.html(pwa_html, height=0, width=0)
+
+# Activate PWA settings on page load
+enable_pwa()
 
 # --- CENTRAL STORAGE CONTEXT ---
 init_db()
@@ -155,7 +189,7 @@ else:
             
             st.sidebar.markdown("---")
             
-            # Master Admin Selection Menu (Cleaned of overrides/podium/shootout options)
+            # Master Admin Selection Menu
             app_mode = st.sidebar.selectbox(
                 "Select Admin Console:",
                 [
@@ -195,7 +229,6 @@ elif app_mode == "⚙️ Course Directory Setup":
     render_course_manager()
 
 # --- DYNAMIC PERSISTENT OVERLAYS ---
-# Render these modules concurrently when toggled inside active administrative sessions
 if st.session_state.get("admin_authenticated", False):
     if st.session_state.get("enable_overrides", False):
         from views.admin_panel import render_admin_panel
