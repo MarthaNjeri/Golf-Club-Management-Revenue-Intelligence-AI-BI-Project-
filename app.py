@@ -9,12 +9,12 @@ from core.database import init_db, get_db_connection, get_course_pars_and_si
 st.set_page_config(page_title="FairwayIQ Master Hub", page_icon="⛳", layout="wide")
 
 
-# --- 📱 PWA ENGINE & OFFLINE STORAGE INJECTION (FASTAPI OPTION B INTEGRATION) ---
+# --- 📱 PWA ENGINE & OFFLINE STORAGE INJECTION (WITH INSTALL PROMPT) ---
 def enable_pwa_with_offline_cache(player_id="1", current_hole=1, current_scores=None):
     """
-    Injects PWA web app manifest metadata, a Service Worker for static caching,
+    Injects PWA web app manifest metadata, an install prompt banner, a Service Worker for static caching,
     a client-side offline scorecard widget that prevents Streamlit WebSocket freezes,
-    and an dynamic-host sync engine targeting the FastAPI endpoint (Port 8000).
+    and a dynamic-host sync engine targeting the FastAPI endpoint (Port 8000).
     """
     if current_scores is None:
         current_scores = {}
@@ -22,6 +22,17 @@ def enable_pwa_with_offline_cache(player_id="1", current_hole=1, current_scores=
     scores_json = json.dumps(current_scores)
 
     pwa_offline_html = f"""
+    <!-- 📲 Native Install App Banner (Hidden by default until browser triggers event) -->
+    <div id="pwa-install-banner" style="display: none; background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); color: #fff; padding: 12px 16px; border-radius: 12px; margin-bottom: 12px; border: 1px solid #334155; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; align-items: center; justify-content: space-between; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
+        <div>
+            <h5 style="margin: 0 0 2px 0; color: #4ade80; font-size: 13px; font-weight: 700;">📲 Install FairwayIQ App</h5>
+            <p style="margin: 0; font-size: 11px; color: #94a3b8;">Add to home screen for off-grid course scoring.</p>
+        </div>
+        <button id="pwa-install-btn" style="padding: 8px 14px; background: #16a34a; color: white; border: none; border-radius: 6px; font-weight: bold; font-size: 12px; cursor: pointer; white-space: nowrap;">
+            Install
+        </button>
+    </div>
+
     <!-- 📱 Client-Side Offline Score Card (Prevents Streamlit WS disconnect freeze) -->
     <div id="pwa-score-card" style="background: #0f172a; color: #f8fafc; padding: 16px; border-radius: 12px; margin: 10px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; border: 1px solid #1e293b; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.3);">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
@@ -69,7 +80,34 @@ def enable_pwa_with_offline_cache(player_id="1", current_hole=1, current_scores=
         targetDoc.head.appendChild(manifestLink);
     }}
 
-    // 2. Service Worker Registration for Static Caching
+    // 2. Capture Install Prompt Event
+    let deferredPrompt;
+    window.addEventListener('beforeinstallprompt', (e) => {{
+        e.preventDefault();
+        deferredPrompt = e;
+        const banner = document.getElementById('pwa-install-banner');
+        if (banner) {{
+            banner.style.display = 'flex';
+        }}
+    }});
+
+    document.addEventListener('DOMContentLoaded', () => {{
+        const installBtn = document.getElementById('pwa-install-btn');
+        if (installBtn) {{
+            installBtn.addEventListener('click', async () => {{
+                if (!deferredPrompt) return;
+                deferredPrompt.prompt();
+                const {{ outcome }} = await deferredPrompt.userChoice;
+                if (outcome === 'accepted') {{
+                    console.log('User accepted the install prompt');
+                }}
+                deferredPrompt = null;
+                document.getElementById('pwa-install-banner').style.display = 'none';
+            }});
+        }}
+    }});
+
+    // 3. Service Worker Registration for Static Caching
     const targetNav = window.parent.navigator || navigator;
     if ('serviceWorker' in targetNav) {{
         const swCode = `
@@ -101,7 +139,7 @@ def enable_pwa_with_offline_cache(player_id="1", current_hole=1, current_scores=
             .catch(err => console.log('ServiceWorker Reg Failed:', err));
     }}
 
-    // 3. Client-Side Offline Storage Action
+    // 4. Client-Side Offline Storage Action
     function saveScoreOffline() {{
         const holeNum = document.getElementById('pwa-hole-num').value;
         const scoreVal = document.getElementById('pwa-score-val').value;
@@ -171,7 +209,7 @@ def enable_pwa_with_offline_cache(player_id="1", current_hole=1, current_scores=
         }}
     }}
 
-    // 4. Live Network Badge & Listener
+    // 5. Live Network Badge & Listener
     function updateOnlineStatus() {{
         const isOnline = navigator.onLine;
         let badge = targetDoc.getElementById('fairwayiq-net-status');
@@ -210,7 +248,7 @@ def enable_pwa_with_offline_cache(player_id="1", current_hole=1, current_scores=
     setTimeout(updateOnlineStatus, 800);
     </script>
     """
-    components.html(pwa_offline_html, height=210)
+    components.html(pwa_offline_html, height=270)
 
 
 # --- CENTRAL STORAGE CONTEXT ---
