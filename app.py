@@ -13,8 +13,8 @@ st.set_page_config(page_title="FairwayIQ Master Hub", page_icon="⛳", layout="w
 def enable_pwa_with_offline_cache(player_id="1", current_hole=1, current_scores=None):
     """
     Injects PWA web app manifest metadata, a Service Worker for static caching,
-    a JavaScript localStorage engine for offline score persistence with ISO timestamps,
-    and a background fetch sync engine targeting the FastAPI endpoint (Port 8000).
+    a client-side offline scorecard widget that prevents Streamlit WebSocket freezes,
+    and an dynamic-host sync engine targeting the FastAPI endpoint (Port 8000).
     """
     if current_scores is None:
         current_scores = {}
@@ -22,31 +22,52 @@ def enable_pwa_with_offline_cache(player_id="1", current_hole=1, current_scores=
     scores_json = json.dumps(current_scores)
 
     pwa_offline_html = f"""
+    <!-- 📱 Client-Side Offline Score Card (Prevents Streamlit WS disconnect freeze) -->
+    <div id="pwa-score-card" style="background: #0f172a; color: #f8fafc; padding: 16px; border-radius: 12px; margin: 10px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; border: 1px solid #1e293b; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.3);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <h4 style="margin: 0; color: #4ade80; font-size: 16px; display: flex; align-items: center; gap: 6px;">
+                <span>⛳</span> Mobile Offline Scorecard
+            </h4>
+            <span id="pwa-sync-pill" style="font-size: 10px; padding: 2px 8px; border-radius: 12px; background: #334155; color: #94a3b8; font-weight: bold;">
+                READY
+            </span>
+        </div>
+        
+        <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 14px;">
+            <div style="flex: 1;">
+                <label style="font-size: 11px; text-transform: uppercase; color: #94a3b8; display: block; margin-bottom: 4px; font-weight: 600;">Hole</label>
+                <input type="number" id="pwa-hole-num" value="{current_hole}" min="1" max="18" style="width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #334155; background: #1e293b; color: #fff; font-size: 14px; box-sizing: border-box;">
+            </div>
+            
+            <div style="flex: 1;">
+                <label style="font-size: 11px; text-transform: uppercase; color: #94a3b8; display: block; margin-bottom: 4px; font-weight: 600;">Strokes</label>
+                <input type="number" id="pwa-score-val" value="4" min="1" max="15" style="width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #334155; background: #1e293b; color: #fff; font-size: 14px; box-sizing: border-box;">
+            </div>
+        </div>
+        
+        <button onclick="saveScoreOffline()" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #16a34a 0%, #15803d 100%); color: white; border: none; border-radius: 8px; font-weight: 700; font-size: 14px; cursor: pointer; transition: all 0.2s ease;">
+            💾 Save Score (Offline Guaranteed)
+        </button>
+        
+        <p id="pwa-status-msg" style="font-size: 12px; color: #94a3b8; margin: 10px 0 0 0; text-align: center; min-height: 16px;"></p>
+    </div>
+
     <script>
-    const API_ENDPOINT = "http://localhost:8000/api/sync_scorecard";
+    // Dynamically resolve server hostname (works for localhost or LAN IP)
+    const currentHost = window.parent.location.hostname || window.location.hostname || 'localhost';
+    const API_ENDPOINT = `http://${{currentHost}}:8000/api/sync_scorecard`;
     const PLAYER_ID = "{player_id}";
     const STORAGE_KEY = `fairwayiq_scores_${{PLAYER_ID}}`;
     const serverScores = {scores_json};
-    const activeHole = {current_hole};
 
     // 1. PWA Manifest & App Mode Setup
-    if (!document.querySelector('link[rel="manifest"]')) {{
-        const manifestLink = document.createElement('link');
+    const targetDoc = window.parent.document || document;
+    if (!targetDoc.querySelector('link[rel="manifest"]')) {{
+        const manifestLink = targetDoc.createElement('link');
         manifestLink.rel = 'manifest';
         manifestLink.href = 'data:application/json;base64,eyJzaG9ydF9uYW1lIjoiRmFpcndheUlRIiwibmFtZSI6IkZhaXJ3YXlJUSBHb2xmIFJldmVudWUgJiBPcGVyYXRpb25zIiwiaWNvbnMiOlt7InNyYyI6Imh0dHBzOi8vY2RuLWljb25zLXBuZy5mbGF0aWNvbi5jb20vNTEyLzMwNzYvMzA3NjQxMy5wbmciLCJ0eXBlIjoiaW1hZ2UvcG5nIiwic2l6ZXMiOiIxOTJ4MTkyIn0seyJzcmMiOiJodHRwczovL2Nkbi1pY29ucy1wbmcuZmxhdGljb24uY29tLzUxMi8zMDc2LzMwNzY0MTMucG5nIiwidHlwZSI6ImltYWdlL3BuZyIsInNpemVzIjo1MTJ4NTEyfV0sInN0YXJ0X3VybCI6Ii8iLCJiYWNrZ3JvdW5kX2NvbG9yIjoiI2ZmZmZmZiIsInRoZW1lX2NvbG9yIjoiIzFiOGQzZSIsImRpc3BsYXkiOiJzdGFuZGFsb25lIiwib3JpZW50YXRpb24iOiJwb3J0cmFpdCJ9';
-        document.head.appendChild(manifestLink);
+        targetDoc.head.appendChild(manifestLink);
     }}
-
-    // Mobile Safari & Chrome App Mode Tags
-    const metaApp = document.createElement('meta');
-    metaApp.name = 'apple-mobile-web-app-capable';
-    metaApp.content = 'yes';
-    document.head.appendChild(metaApp);
-
-    const metaStatus = document.createElement('meta');
-    metaStatus.name = 'apple-mobile-web-app-status-bar-style';
-    metaStatus.content = 'black-translucent';
-    document.head.appendChild(metaStatus);
 
     // 2. Service Worker Registration for Static Caching
     const targetNav = window.parent.navigator || navigator;
@@ -80,14 +101,13 @@ def enable_pwa_with_offline_cache(player_id="1", current_hole=1, current_scores=
             .catch(err => console.log('ServiceWorker Reg Failed:', err));
     }}
 
-    // 3. LocalStorage & Timestamp-Based Sync Engine
-    if (!localStorage.getItem(STORAGE_KEY)) {{
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({{ scores: {{}}, unsynced: false }}));
-    }}
+    // 3. Client-Side Offline Storage Action
+    function saveScoreOffline() {{
+        const holeNum = document.getElementById('pwa-hole-num').value;
+        const scoreVal = document.getElementById('pwa-score-val').value;
+        const statusMsg = document.getElementById('pwa-status-msg');
+        const pill = document.getElementById('pwa-sync-pill');
 
-    // Function exposed to window.parent so Streamlit elements can call it directly
-    const targetWindow = window.parent || window;
-    targetWindow.saveScoreLocally = function(holeNum, scoreVal) {{
         try {{
             const data = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{{ "scores": {{}}, "unsynced": false }}');
             
@@ -98,23 +118,29 @@ def enable_pwa_with_offline_cache(player_id="1", current_hole=1, current_scores=
             data.unsynced = true;
             
             localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-            console.log(`[FairwayIQ PWA] Cached Hole ${{holeNum}} locally:`, data.scores[holeNum]);
             
-            // Trigger background sync attempt
-            targetWindow.attemptSyncWithServer();
-        }} catch (e) {{
-            console.error('[FairwayIQ PWA] LocalStorage write failed:', e);
-        }}
-    }};
+            statusMsg.style.color = '#4ade80';
+            statusMsg.innerText = `Saved Hole ${{holeNum}} (${{scoreVal}} strokes) locally!`;
+            
+            pill.style.background = '#d97706';
+            pill.style.color = '#ffffff';
+            pill.innerText = 'QUEUED';
 
-    targetWindow.attemptSyncWithServer = async function() {{
+            attemptSyncWithServer();
+        }} catch (e) {{
+            statusMsg.style.color = '#f87171';
+            statusMsg.innerText = 'Error writing to device storage.';
+        }}
+    }}
+
+    async function attemptSyncWithServer() {{
+        const statusMsg = document.getElementById('pwa-status-msg');
+        const pill = document.getElementById('pwa-sync-pill');
         const data = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{{ "scores": {{}}, "unsynced": false }}');
         
         if (!navigator.onLine || !data.unsynced || Object.keys(data.scores).length === 0) {{
             return;
         }}
-
-        console.log("[FairwayIQ PWA] Network active. Syncing score payload to FastAPI endpoint...");
 
         try {{
             const response = await fetch(API_ENDPOINT, {{
@@ -127,39 +153,27 @@ def enable_pwa_with_offline_cache(player_id="1", current_hole=1, current_scores=
             }});
 
             if (response.ok) {{
-                const result = await response.json();
-                console.log("[FairwayIQ PWA] Background Sync Successful:", result);
-                
                 data.unsynced = false;
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-            }} else {{
-                console.warn("[FairwayIQ PWA] Sync attempt failed with status:", response.status);
+                
+                if (statusMsg) {{
+                    statusMsg.style.color = '#38bdf8';
+                    statusMsg.innerText = '🟢 Synced cached scores to server!';
+                }}
+                if (pill) {{
+                    pill.style.background = '#16a34a';
+                    pill.style.color = '#ffffff';
+                    pill.innerText = 'SYNCED';
+                }}
             }}
         }} catch (err) {{
-            console.error("[FairwayIQ PWA] Background sync error:", err);
-        }}
-    }};
-
-    // Populate server-passed scores if local storage is empty
-    if (Object.keys(serverScores).length > 0) {{
-        const data = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{{ "scores": {{}}, "unsynced": false }}');
-        let updated = false;
-        
-        for (const [h, s] of Object.entries(serverScores)) {{
-            if (!data.scores[h]) {{
-                data.scores[h] = {{ score: parseInt(s), ts: new Date().toISOString() }};
-                updated = true;
-            }}
-        }}
-        if (updated) {{
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+            console.log("Sync queued for reconnect.");
         }}
     }}
 
-    // 4. Live Network Connection Status Badge
+    // 4. Live Network Badge & Listener
     function updateOnlineStatus() {{
         const isOnline = navigator.onLine;
-        const targetDoc = window.parent.document || document;
         let badge = targetDoc.getElementById('fairwayiq-net-status');
         
         if (!badge) {{
@@ -182,7 +196,7 @@ def enable_pwa_with_offline_cache(player_id="1", current_hole=1, current_scores=
             badge.style.backgroundColor = '#1b8d3e';
             badge.style.color = '#ffffff';
             badge.innerText = '🟢 Live Sync Active';
-            targetWindow.attemptSyncWithServer();
+            attemptSyncWithServer();
         }} else {{
             badge.style.backgroundColor = '#d97706';
             badge.style.color = '#ffffff';
@@ -196,7 +210,7 @@ def enable_pwa_with_offline_cache(player_id="1", current_hole=1, current_scores=
     setTimeout(updateOnlineStatus, 800);
     </script>
     """
-    components.html(pwa_offline_html, height=0, width=0)
+    components.html(pwa_offline_html, height=210)
 
 
 # --- CENTRAL STORAGE CONTEXT ---
