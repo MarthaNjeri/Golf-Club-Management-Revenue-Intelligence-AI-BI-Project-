@@ -8,12 +8,13 @@ from core.database import init_db, get_db_connection, get_course_pars_and_si
 # 1. CONFIGURE GLOBAL WORKSPACE
 st.set_page_config(page_title="FairwayIQ Master Hub", page_icon="⛳", layout="wide")
 
-# --- 📱 PWA ENGINE & OFFLINE STORAGE INJECTION ---
-# --- 📱 PWA ENGINE & OFFLINE STORAGE INJECTION ---
+
+# --- 📱 PWA ENGINE & OFFLINE STORAGE INJECTION (FASTAPI OPTION B INTEGRATION) ---
 def enable_pwa_with_offline_cache(player_id="1", current_hole=1, current_scores=None):
     """
     Injects PWA web app manifest metadata, a Service Worker for static caching,
-    and a JavaScript localStorage engine for offline score persistence.
+    a JavaScript localStorage engine for offline score persistence with ISO timestamps,
+    and a background fetch sync engine targeting the FastAPI endpoint (Port 8000).
     """
     if current_scores is None:
         current_scores = {}
@@ -22,6 +23,12 @@ def enable_pwa_with_offline_cache(player_id="1", current_hole=1, current_scores=
 
     pwa_offline_html = f"""
     <script>
+    const API_ENDPOINT = "http://localhost:8000/api/sync_scorecard";
+    const PLAYER_ID = "{player_id}";
+    const STORAGE_KEY = `fairwayiq_scores_${{PLAYER_ID}}`;
+    const serverScores = {scores_json};
+    const activeHole = {current_hole};
+
     // 1. PWA Manifest & App Mode Setup
     if (!document.querySelector('link[rel="manifest"]')) {{
         const manifestLink = document.createElement('link');
@@ -41,7 +48,7 @@ def enable_pwa_with_offline_cache(player_id="1", current_hole=1, current_scores=
     metaStatus.content = 'black-translucent';
     document.head.appendChild(metaStatus);
 
-    // 2. Service Worker Registration for Static Caching (Targeting window.parent for Streamlit)
+    // 2. Service Worker Registration for Static Caching
     const targetNav = window.parent.navigator || navigator;
     if ('serviceWorker' in targetNav) {{
         const swCode = `
@@ -73,66 +80,124 @@ def enable_pwa_with_offline_cache(player_id="1", current_hole=1, current_scores=
             .catch(err => console.log('ServiceWorker Reg Failed:', err));
     }}
 
-    // 3. LocalStorage Scoring Engine
-    const PLAYER_KEY = 'fairwayiq_player_{player_id}_scores';
-    const HOLE_KEY = 'fairwayiq_player_{player_id}_current_hole';
+    // 3. LocalStorage & Timestamp-Based Sync Engine
+    if (!localStorage.getItem(STORAGE_KEY)) {{
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({{ scores: {{}}, unsynced: false }}));
+    }}
 
-    const serverScores = {scores_json};
-    const activeHole = {current_hole};
-
-    function saveScoresLocally(scores, hole) {{
+    // Function exposed to window.parent so Streamlit elements can call it directly
+    const targetWindow = window.parent || window;
+    targetWindow.saveScoreLocally = function(holeNum, scoreVal) {{
         try {{
-            localStorage.setItem(PLAYER_KEY, JSON.stringify(scores));
-            localStorage.setItem(HOLE_KEY, hole.toString());
-            console.log('⛳ FairwayIQ: Cached locally for Hole ' + hole);
+            const data = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{{ "scores": {{}}, "unsynced": false }}');
+            
+            data.scores[holeNum] = {{
+                score: parseInt(scoreVal),
+                ts: new Date().toISOString()
+            }};
+            data.unsynced = true;
+            
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+            console.log(`[FairwayIQ PWA] Cached Hole ${{holeNum}} locally:`, data.scores[holeNum]);
+            
+            // Trigger background sync attempt
+            targetWindow.attemptSyncWithServer();
         }} catch (e) {{
-            console.error('LocalStorage write failed:', e);
+            console.error('[FairwayIQ PWA] LocalStorage write failed:', e);
+        }}
+    }};
+
+    targetWindow.attemptSyncWithServer = async function() {{
+        const data = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{{ "scores": {{}}, "unsynced": false }}');
+        
+        if (!navigator.onLine || !data.unsynced || Object.keys(data.scores).length === 0) {{
+            return;
+        }}
+
+        console.log("[FairwayIQ PWA] Network active. Syncing score payload to FastAPI endpoint...");
+
+        try {{
+            const response = await fetch(API_ENDPOINT, {{
+                method: "POST",
+                headers: {{ "Content-Type": "application/json" }},
+                body: JSON.stringify({{
+                    player_id: PLAYER_ID,
+                    scores: data.scores
+                }})
+            }});
+
+            if (response.ok) {{
+                const result = await response.json();
+                console.log("[FairwayIQ PWA] Background Sync Successful:", result);
+                
+                data.unsynced = false;
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+            }} else {{
+                console.warn("[FairwayIQ PWA] Sync attempt failed with status:", response.status);
+            }}
+        }} catch (err) {{
+            console.error("[FairwayIQ PWA] Background sync error:", err);
+        }}
+    }};
+
+    // Populate server-passed scores if local storage is empty
+    if (Object.keys(serverScores).length > 0) {{
+        const data = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{{ "scores": {{}}, "unsynced": false }}');
+        let updated = false;
+        
+        for (const [h, s] of Object.entries(serverScores)) {{
+            if (!data.scores[h]) {{
+                data.scores[h] = {{ score: parseInt(s), ts: new Date().toISOString() }};
+                updated = true;
+            }}
+        }}
+        if (updated) {{
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
         }}
     }}
 
-    // Auto-cache current server-passed scores on load
-    if (Object.keys(serverScores).length > 0) {{
-        saveScoresLocally(serverScores, activeHole);
-    }}
-
-    // 4. Network Connection Status Listener
+    // 4. Live Network Connection Status Badge
     function updateOnlineStatus() {{
         const isOnline = navigator.onLine;
-        let badge = document.getElementById('fairwayiq-net-status');
+        const targetDoc = window.parent.document || document;
+        let badge = targetDoc.getElementById('fairwayiq-net-status');
         
         if (!badge) {{
-            badge = document.createElement('div');
+            badge = targetDoc.createElement('div');
             badge.id = 'fairwayiq-net-status';
             badge.style.position = 'fixed';
-            badge.style.bottom = '12px';
-            badge.style.right = '12px';
-            badge.style.padding = '6px 12px';
+            badge.style.bottom = '14px';
+            badge.style.right = '14px';
+            badge.style.padding = '8px 14px';
             badge.style.borderRadius = '20px';
             badge.style.fontSize = '12px';
             badge.style.fontWeight = 'bold';
             badge.style.zIndex = '999999';
-            badge.style.boxShadow = '0 2px 6px rgba(0,0,0,0.2)';
-            document.body.appendChild(badge);
+            badge.style.boxShadow = '0 3px 8px rgba(0,0,0,0.25)';
+            badge.style.transition = 'all 0.3s ease';
+            targetDoc.body.appendChild(badge);
         }}
 
         if (isOnline) {{
             badge.style.backgroundColor = '#1b8d3e';
             badge.style.color = '#ffffff';
             badge.innerText = '🟢 Live Sync Active';
+            targetWindow.attemptSyncWithServer();
         }} else {{
             badge.style.backgroundColor = '#d97706';
             badge.style.color = '#ffffff';
-            badge.innerText = '🟠 Offline Mode (Caching Scorecard)';
+            badge.innerText = '🟠 Offline Mode (Caching Scores)';
         }}
     }}
 
     window.addEventListener('online', updateOnlineStatus);
     window.addEventListener('offline', updateOnlineStatus);
     document.addEventListener('DOMContentLoaded', updateOnlineStatus);
-    setTimeout(updateOnlineStatus, 1000);
+    setTimeout(updateOnlineStatus, 800);
     </script>
     """
     components.html(pwa_offline_html, height=0, width=0)
+
 
 # --- CENTRAL STORAGE CONTEXT ---
 init_db()
