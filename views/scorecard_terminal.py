@@ -123,15 +123,13 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
 
     # --- RESOLVE DYNAMIC COURSE DETAILS ---
     try:
-        # Queries DB dynamically for current course context selection
         raw_map = get_course_pars_and_si(st.session_state.selected_course, st.session_state.selected_tee)
         if raw_map:
-            # Map structural coordinates for backwards compatibility
             ACTIVE_PARS = {hole: val[0] for hole, val in raw_map.items()}
             ACTIVE_SI = {hole: val[1] for hole, val in raw_map.items()}
         else:
             ACTIVE_PARS = FALLBACK_PARS
-            ACTIVE_SI = {h: h for h in range(1, 19)} # Basic fallback
+            ACTIVE_SI = {h: h for h in range(1, 19)}
     except Exception:
         ACTIVE_PARS = FALLBACK_PARS
         ACTIVE_SI = {h: h for h in range(1, 19)}
@@ -159,23 +157,24 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
             input_name = st.text_input("Enter Registered Full Name:")
             input_hcp = st.number_input("Verified Club Handicap:", min_value=0, max_value=54, value=12, step=1)
             
-            # Dynamic Region and Course dropdowns inside registration
             col_reg1, col_reg2 = st.columns(2)
             with col_reg1:
                 region_choice = st.selectbox("Select Club Region:", list(KENYAN_GOLF_CLUBS.keys()))
             with col_reg2:
                 reg_course = st.selectbox("Select Golf Club Playing Today:", KENYAN_GOLF_CLUBS[region_choice], key="reg_course_member")
             
-            # Query tees available for this course
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT DISTINCT h.tee_color FROM course_holes h
-                JOIN golf_courses c ON h.course_id = c.course_id
-                WHERE c.course_name = ?
-            """, (reg_course,))
-            available_tees = [r['tee_color'] for r in cursor.fetchall()] or ["White"]
-            reg_tee = st.selectbox("Select Tee Set Played:", available_tees, key="reg_tee_member")
+            try:
+                cursor.execute("""
+                    SELECT DISTINCT h.tee_color FROM course_holes h
+                    JOIN golf_courses c ON h.course_id = c.course_id
+                    WHERE c.course_name = ?
+                """, (reg_course,))
+                available_tees = [r[0] for r in cursor.fetchall()] or ["White"]
+            except Exception:
+                available_tees = ["White"]
 
+            reg_tee = st.selectbox("Select Tee Set Played:", available_tees, key="reg_tee_member")
             comp_type = st.selectbox("Select Active Competition / Event:", KENYAN_COMPETITIONS, key="reg_comp_member")
             variant = st.selectbox("Select Planned Round Format:", ["Full 18 Holes", "Front 9 Only"])
             
@@ -190,7 +189,6 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
                     st.session_state.selected_tee = reg_tee
                     st.session_state.competition = comp_type
                     st.session_state.round_variant = variant
-                    # Reset dynamic scores with newly loaded course pars
                     st.session_state.hole_scores = {h: ACTIVE_PARS.get(h, 4) for h in range(1, 19)}
                     st.rerun()
                 else:
@@ -198,11 +196,8 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
                     
         elif player_type == "Visiting Player":
             input_name = st.text_input("Visitor Full Name:")
-            
-            # Select Visitor's actual home club in Kenya
             visitor_home_club = st.selectbox("Select Your Official Home Club:", ALL_KENYAN_CLUBS_FLAT)
             
-            # Select Playing venue dynamically via region lookup
             col_v1, col_v2 = st.columns(2)
             with col_v1:
                 region_choice = st.selectbox("Select Playing Club Region:", list(KENYAN_GOLF_CLUBS.keys()))
@@ -210,14 +205,17 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
                 reg_course = st.selectbox("Select Venue Playing Today:", KENYAN_GOLF_CLUBS[region_choice], key="reg_course_guest")
             
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT DISTINCT h.tee_color FROM course_holes h
-                JOIN golf_courses c ON h.course_id = c.course_id
-                WHERE c.course_name = ?
-            """, (reg_course,))
-            available_tees = [r['tee_color'] for r in cursor.fetchall()] or ["White"]
-            reg_tee = st.selectbox("Select Tee Set Played:", available_tees, key="reg_tee_guest")
+            try:
+                cursor.execute("""
+                    SELECT DISTINCT h.tee_color FROM course_holes h
+                    JOIN golf_courses c ON h.course_id = c.course_id
+                    WHERE c.course_name = ?
+                """, (reg_course,))
+                available_tees = [r[0] for r in cursor.fetchall()] or ["White"]
+            except Exception:
+                available_tees = ["White"]
 
+            reg_tee = st.selectbox("Select Tee Set Played:", available_tees, key="reg_tee_guest")
             visitor_hcp = st.number_input("Official Handicap Index:", min_value=0, max_value=54, step=1)
             comp_type = st.selectbox("Select Active Competition / Event:", KENYAN_COMPETITIONS, key="reg_comp_guest")
             variant = st.selectbox("Select Planned Round Format:", ["Full 18 Holes", "Front 9 Only"])
@@ -227,7 +225,6 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
                     st.session_state.authorized = True
                     st.session_state.auth_type = "Visitor"
                     st.session_state.player_id = 9000 + visitor_hcp
-                    # Append visitor home club in parentheses to Player Name
                     st.session_state.player_name = f"{input_name} ({visitor_home_club})"
                     st.session_state.player_hcp = visitor_hcp
                     st.session_state.selected_course = reg_course
@@ -250,7 +247,7 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
                 try:
                     target_pin = st.secrets["admin"]["pin"]
                 except Exception:
-                    target_pin = "1234" # Fallback if local secrets is missing
+                    target_pin = "1234"
 
                 if admin_pin == target_pin:
                     st.session_state.authorized = True
@@ -277,7 +274,6 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
         if st.session_state.auth_type == "Admin":
             st.header("📊 FairwayIQ Executive Dashboard")
             
-            # Dynamic Admin Tabs System
             admin_tab1, admin_tab2, admin_tab3 = st.tabs([
                 "📈 PowerBI Live Analytics", 
                 "✏️ Correct / Edit Scorecards", 
@@ -296,7 +292,6 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
                     try:
                         df_editor = pd.read_csv(DB_FILE)
                         if not df_editor.empty:
-                            # Spreadsheet-style editable table for score corrections
                             edited_df = st.data_editor(
                                 df_editor,
                                 use_container_width=True,
@@ -323,11 +318,9 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
                     try:
                         df_export = pd.read_csv(DB_FILE)
                         if not df_export.empty:
-                            # Standard ascending sorting based on gross scores
                             clean_export_df = df_export.sort_values(by="Score", ascending=True)
                             st.dataframe(clean_export_df, use_container_width=True)
                             
-                            # CSV compiler configuration
                             csv_export_bytes = clean_export_df.to_csv(index=False).encode('utf-8')
                             file_stamp = datetime.today().strftime('%Y%m%d_%H%M')
                             
@@ -346,14 +339,12 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
                 else:
                     st.info("No active scorecard database file exists to export.")
 
-        # ROUTE B: UPGRADED HOLE-BY-HOLE ENGINE (Now wraps around dual tabs for players!)
+        # ROUTE B: PLAYER ENGINE
         else:
             player_tab1, player_tab2 = st.tabs(["📝 Record Live Scorecard", "🍔 Pre-Order to the Turn"])
 
             with player_tab1:
                 current_h = st.session_state.current_hole
-                
-                # Filter active data limits based on variant constraints (1-9 or 1-18)
                 active_hole_limit = 9 if st.session_state.round_variant == "Front 9 Only" else 18
                 relevant_holes = range(1, active_hole_limit + 1)
                 
@@ -363,7 +354,6 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
                 strokes_completed = sum(st.session_state.hole_scores[h] for h in completed_holes)
                 relative_par = strokes_completed - par_completed
 
-                # Dynamic Stats Top Bar
                 col_m1, col_m2, col_m3, col_m4 = st.columns(4)
                 col_m1.metric("Hole Timeline", f"{current_h if current_h <= active_hole_limit else active_hole_limit} / {active_hole_limit}")
                 col_m2.metric("Running Gross", f"{running_gross} Strokes")
@@ -374,23 +364,20 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
                     score_fmt = f"+{relative_par}" if relative_par > 0 else ("Even" if relative_par == 0 else f"{relative_par}")
                 col_m3.metric("To Par (Live)", score_fmt)
                 
-                # Apply adjusted handicap rating for 9-hole submissions (halved handicap)
                 hcp_deduction = st.session_state.player_hcp / 2 if st.session_state.round_variant == "Front 9 Only" else st.session_state.player_hcp
                 col_m4.metric("Net Projected", f"{int(running_gross - hcp_deduction)}")
 
                 st.markdown("---")
 
-                # ENGINE STATE 1: GOLFER IS RUNNING THE FAIRWAYS
+                # STATE 1: RUNNING THE HOLES
                 if current_h <= active_hole_limit:
                     st.subheader(f"🏌️ Active Interface: Hole {current_h}")
                     
                     c_card1, c_card2, c_card3 = st.columns(3)
-                    # DYNAMICALLY RENDER PARS AND STROKE INDEX FROM SQLite DATABASE
                     c_card1.info(f"⛳ **Hole Allocation:** Par **{ACTIVE_PARS.get(current_h, 4)}** | Stroke Index: **{ACTIVE_SI.get(current_h, current_h)}**")
                     c_card2.metric("Current Value Saved", f"{st.session_state.hole_scores[current_h]} Strokes")
                     c_card3.warning(f"🏆 **Event Class:** {st.session_state.competition}")
                     
-                    # Interactive Step Adjustments
                     hcp_strokes = st.number_input(
                         "Input Score for Current Hole (Gross Strokes):",
                         min_value=1, max_value=15, 
@@ -399,7 +386,6 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
                     )
                     st.session_state.hole_scores[current_h] = hcp_strokes
 
-                    # Control Row Execution
                     st.write("")
                     b_col1, b_col2 = st.columns(2)
                     with b_col1:
@@ -415,10 +401,9 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
                         else:
                             btn_label = "🏁 Transition to 9-Hole Review" if active_hole_limit == 9 else "🏁 Transition to 18th Hole Review"
                             if st.button(btn_label, type="primary", use_container_width=True):
-                                st.session_state.current_hole = 19 # Triggers Review Engine
+                                st.session_state.current_hole = 19
                                 st.rerun()
                                 
-                    # Mid-Round Safety Valve: Allow players who chose 18 holes to safely clock out early at hole 9
                     if current_h == 9 and st.session_state.round_variant == "Full 18 Holes":
                         st.write("")
                         if st.button("⚠️ Clock Out Early (Submit Front 9 Only)", use_container_width=True):
@@ -426,7 +411,7 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
                             st.session_state.current_hole = 19
                             st.rerun()
 
-                # ENGINE STATE 2: THE CARD COMPLETED REVIEW SCREEN
+                # STATE 2: REVIEW MATRIX & SUBMISSION
                 else:
                     st.balloons()
                     st.success(f"🎉 **{st.session_state.round_variant} Green Cleared! Score Registry Compiled.**")
@@ -449,8 +434,7 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
                             final_net_calc = running_gross - hcp_deduction
                             st.metric("Certified Net Finish Score", f"{int(final_net_calc)}")
 
-                        # Expandable hole grid verification display mapping only played context rows
-                        with st.expander(f"🔍 Audit Detailed {st.session_state.round_variant} Matrix Map"):
+                        with st.expander(f"🔍 Audit Detailed {st.session_state.round_variant} Matrix Map", expanded=True):
                             grid_cols = st.columns(6)
                             for idx, h_idx in enumerate(relevant_holes):
                                 col_target = idx % 6
@@ -463,7 +447,9 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
                             if marker_verification == "Choose official marker...":
                                 st.error("⚠️ **R&A Verification Rule Violation:** Scorecard rejects entry. You must assign an attesting playing partner marker to authenticate the tournament record.")
                             else:
-                                # Append directly into shared file infrastructure 
+                                play_date_str = datetime.today().strftime('%Y-%m-%d %H:%M:%S')
+                                
+                                # 1. Fallback CSV append logic
                                 new_row_data = pd.DataFrame([{
                                     "MemberID": st.session_state.player_id,
                                     "PlayerName": f"{st.session_state.player_name} ({st.session_state.round_variant})",
@@ -472,7 +458,7 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
                                     "Score": running_gross,
                                     "Competition": st.session_state.competition,
                                     "MarkerVerification": marker_verification,
-                                    "PlayDate": datetime.today().strftime('%Y-%m-%d %H:%M:%S')
+                                    "PlayDate": play_date_str
                                 }])
                                 
                                 os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
@@ -480,20 +466,17 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
                                     new_row_data.to_csv(DB_FILE, mode='a', header=False, index=False)
                                 else:
                                     new_row_data.to_csv(DB_FILE, mode='w', header=True, index=False)
-                                
-                                st.success(f"📦 Pipeline Synchronized! Scorecard locked and logged. Marker Signature Token generated: UUID-[{marker_verification.replace(' ', '_')}]")
+
+                                st.success(f"📦 Pipeline Synchronized! Scorecard locked and logged. Marker Token: UUID-[{marker_verification.replace(' ', '_')}]")
                                 st.session_state.current_hole = 1
                                 st.session_state.hole_scores = {h: ACTIVE_PARS.get(h, 4) for h in range(1, 19)}
                                 st.rerun()
 
-            # =====================================================================
-            # TAB 2: 📱 QR THE TURN PRE-ORDER SYSTEM
-            # =====================================================================
+            # TAB 2: TURN PRE-ORDER
             with player_tab2:
                 st.subheader("🍔 Fast-Track Clubhouse & Turn Pre-Ordering")
                 st.write("Beat the Halfway House queue! Order food while on the course. It will be waiting for you hot at the Turn.")
 
-                # Menu Options aligned with fandb_terminal
                 MENU_ITEMS = {
                     "🍺 Tusker / White Cap Lager": {"price": 400, "cogs": 180},
                     "🥪 Club Sandwich & French Fries": {"price": 850, "cogs": 280},
@@ -507,7 +490,7 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
                     current_hole = st.selectbox(
                         "📍 Where are you on the course right now?", 
                         [f"Hole {h}" for h in range(1, 19)], 
-                        index=max(0, min(17, st.session_state.current_hole - 1))  # Sync with active scorecard hole!
+                        index=max(0, min(17, st.session_state.current_hole - 1))
                     )
                     billing_type = st.radio("Charging Account Allocation:", ["Direct Member Folio", "Caddy Voucher", "Guest Chit"])
 
@@ -515,7 +498,6 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
                     selected_food = st.selectbox("Select Samosa/Beverage Option:", list(MENU_ITEMS.keys()))
                     qty = st.number_input("Quantity:", min_value=1, max_value=10, value=1)
                     
-                    # Predictive Pace-of-Play ETA Calculation (Approx 15 mins per hole remaining to the turn)
                     hole_num = int(current_hole.split(" ")[1])
                     if hole_num <= 9:
                         holes_remaining = 9 - hole_num
@@ -524,13 +506,12 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
                         holes_remaining = 18 - hole_num
                         pickup_location = "Ready at 19th Hole Lounge Table"
 
-                    eta_minutes = max(10, holes_remaining * 15)  # Guarantees a baseline 10 minute prep warning
+                    eta_minutes = max(10, holes_remaining * 15)
                     predicted_pickup = datetime.now() + timedelta(minutes=eta_minutes)
                     
                     st.info(f"🕒 **Fulfillment Target:** {pickup_location} | **Pickup ETA:** {predicted_pickup.strftime('%H:%M')} (In {eta_minutes} mins)")
 
                 if st.button("Confirm & Post Pre-Order", type="primary"):
-                    # Prepare transaction row
                     txn_id = f"TXN-QR-{int(datetime.timestamp(datetime.now()))}"
                     price = MENU_ITEMS[selected_food]["price"] * qty
                     cogs = MENU_ITEMS[selected_food]["cogs"] * qty
@@ -570,7 +551,7 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
                 df_view = pd.read_csv(DB_FILE)
                 if not df_view.empty:
                     st.dataframe(df_view.sort_values(by="Score", ascending=True), use_container_width=True)
-            except:
+            except Exception:
                 st.info("Leaderboard feed indexing.")
 
     conn.close()

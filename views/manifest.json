@@ -1,0 +1,21 @@
+{
+  "short_name": "FairwayIQ",
+  "name": "FairwayIQ Golf Revenue & Operations",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3076/3076413.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3076/3076413.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#ffffff",
+  "theme_color": "#1b4d3e",
+  "display": "standalone",
+  "orientation": "portrait"
+}
