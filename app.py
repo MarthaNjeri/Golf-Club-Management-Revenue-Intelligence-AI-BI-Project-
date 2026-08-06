@@ -1,29 +1,35 @@
 import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
+import json
 import os
 from core.database import init_db, get_db_connection, get_course_pars_and_si
 
 # 1. CONFIGURE GLOBAL WORKSPACE
 st.set_page_config(page_title="FairwayIQ Master Hub", page_icon="⛳", layout="wide")
 
-# --- 📱 PWA ENGINE INJECTION ---
-def enable_pwa():
+# --- 📱 PWA ENGINE & OFFLINE STORAGE INJECTION ---
+def enable_pwa_with_offline_cache(player_id="1", current_hole=1, current_scores=None):
     """
-    Injects PWA web app manifest metadata into the browser head
-    to enable "Add to Home Screen" full-screen capabilities on mobile devices.
+    Injects PWA web app manifest metadata and a JavaScript localStorage engine
+    to support full-screen app installation and offline golf score caching.
     """
-    pwa_html = """
+    if current_scores is None:
+        current_scores = {}
+
+    scores_json = json.dumps(current_scores)
+
+    pwa_offline_html = f"""
     <script>
-    // 1. Inject Manifest dynamically into document head
-    if (!document.querySelector('link[rel="manifest"]')) {
+    // 1. PWA Manifest & App Mode Setup
+    if (!document.querySelector('link[rel="manifest"]')) {{
         const manifestLink = document.createElement('link');
         manifestLink.rel = 'manifest';
-        manifestLink.href = 'data:application/json;base64,eyJzaG9ydF9uYW1lIjoiRmFpcndheUlRIiwibmFtZSI6IkZhaXJ3YXlJUSBHb2xmIFJldmVudWUgJiBPcGVyYXRpb25zIiwiaWNvbnMiOlt7InNyYyI6Imh0dHBzOi8vY2RuLWljb25zLXBuZy5mbGF0aWNvbi5jb20vNTEyLzMwNzYvMzA3NjQxMy5wbmciLCJ0eXBlIjoiaW1hZ2UvcG5nIiwic2l6ZXMiOiIxOTJ4MTkyIn0seyJzcmMiOiJodHRwczovL2Nkbi1pY29ucy1wbmcuZmxhdGljb24uY29tLzUxMi8zMDc2LzMwNzY0MTMucG5nIiwidHlwZSI6ImltYWdlL3BuZyIsInNpemVzIjointeDUxMiJ9XSwic3RhcnRfdXJsIjoiLyIsImJhY2tncm91bmRfY29sb3IiOiIjZmZmZmZmIiwidGhlbWVfY29sb3IiOiIjMWI4ZDNlIiwiZGlzcGxheSI6InN0YW5kYWxvbmUiLCJvcmllbnRhdGlvbiI6InBvcnRyYWl0In0=';
+        manifestLink.href = 'data:application/json;base64,eyJzaG9ydF9uYW1lIjoiRmFpcndheUlRIiwibmFtZSI6IkZhaXJ3YXlJUSBHb2xmIFJldmVudWUgJiBPcGVyYXRpb25zIiwiaWNvbnMiOlt7InNyYyI6Imh0dHBzOi8vY2RuLWljb25zLXBuZy5mbGF0aWNvbi5jb20vNTEyLzMwNzYvMzA3NjQxMy5wbmciLCJ0eXBlIjoiaW1hZ2UvcG5nIiwic2l6ZXMiOiIxOTJ4MTkyIn0seyJzcmMiOiJodHRwczovL2Nkbi1pY29ucy1wbmcuZmxhdGljb24uY29tLzUxMi8zMDc2LzMwNzY0MTMucG5nIiwidHlwZSI6ImltYWdlL3BuZyIsInNpemVzIjo1MTJ4NTEyfV0sInN0YXJ0X3VybCI6Ii8iLCJiYWNrZ3JvdW5kX2NvbG9yIjoiI2ZmZmZmZiIsInRoZW1lX2NvbG9yIjoiIzFiOGQzZSIsImRpc3BsYXkiOiJzdGFuZGFsb25lIiwib3JpZW50YXRpb24iOiJwb3J0cmFpdCJ9';
         document.head.appendChild(manifestLink);
-    }
+    }}
 
-    // 2. Mobile Safari & Chrome App Mode Tags
+    // Mobile Safari & Chrome App Mode Tags
     const metaApp = document.createElement('meta');
     metaApp.name = 'apple-mobile-web-app-capable';
     metaApp.content = 'yes';
@@ -33,12 +39,67 @@ def enable_pwa():
     metaStatus.name = 'apple-mobile-web-app-status-bar-style';
     metaStatus.content = 'black-translucent';
     document.head.appendChild(metaStatus);
+
+    // 2. LocalStorage Scoring Engine
+    const PLAYER_KEY = 'fairwayiq_player_{player_id}_scores';
+    const HOLE_KEY = 'fairwayiq_player_{player_id}_current_hole';
+
+    const serverScores = {scores_json};
+    const activeHole = {current_hole};
+
+    function saveScoresLocally(scores, hole) {{
+        try {{
+            localStorage.setItem(PLAYER_KEY, JSON.stringify(scores));
+            localStorage.setItem(HOLE_KEY, hole.toString());
+            console.log('⛳ FairwayIQ: Cached locally for Hole ' + hole);
+        }} catch (e) {{
+            console.error('LocalStorage write failed:', e);
+        }}
+    }}
+
+    // Auto-cache current server-passed scores on load
+    if (Object.keys(serverScores).length > 0) {{
+        saveScoresLocally(serverScores, activeHole);
+    }}
+
+    // 3. Network Connection Status Listener
+    function updateOnlineStatus() {{
+        const isOnline = navigator.onLine;
+        let badge = document.getElementById('fairwayiq-net-status');
+        
+        if (!badge) {{
+            badge = document.createElement('div');
+            badge.id = 'fairwayiq-net-status';
+            badge.style.position = 'fixed';
+            badge.style.bottom = '12px';
+            badge.style.right = '12px';
+            badge.style.padding = '6px 12px';
+            badge.style.borderRadius = '20px';
+            badge.style.fontSize = '12px';
+            badge.style.fontWeight = 'bold';
+            badge.style.zIndex = '999999';
+            badge.style.boxShadow = '0 2px 6px rgba(0,0,0,0.2)';
+            document.body.appendChild(badge);
+        }}
+
+        if (isOnline) {{
+            badge.style.backgroundColor = '#1b8d3e';
+            badge.style.color = '#ffffff';
+            badge.innerText = '🟢 Live Sync Active';
+        }} else {{
+            badge.style.backgroundColor = '#d97706';
+            badge.style.color = '#ffffff';
+            badge.innerText = '🟠 Offline Mode (Caching Scorecard)';
+        }}
+    }}
+
+    window.addEventListener('online', updateOnlineStatus);
+    window.addEventListener('offline', updateOnlineStatus);
+    document.addEventListener('DOMContentLoaded', updateOnlineStatus);
+    setTimeout(updateOnlineStatus, 1000);
     </script>
     """
-    components.html(pwa_html, height=0, width=0)
-
-# Activate PWA settings on page load
-enable_pwa()
+    components.html(pwa_offline_html, height=0, width=0)
 
 # --- CENTRAL STORAGE CONTEXT ---
 init_db()
@@ -78,6 +139,13 @@ if 'current_hole' not in st.session_state:
     st.session_state.current_hole = 1
 if 'hole_scores' not in st.session_state:
     st.session_state.hole_scores = {h: ACTIVE_PARS[h] for h in range(1, 19)}
+
+# Activate PWA + Offline Caching Engine using live session state
+enable_pwa_with_offline_cache(
+    player_id=st.session_state.player_id,
+    current_hole=st.session_state.current_hole,
+    current_scores=st.session_state.hole_scores
+)
 
 # Administrative & Waitstaff persistent authentication states
 if 'admin_authenticated' not in st.session_state:
